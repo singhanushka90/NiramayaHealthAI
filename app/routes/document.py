@@ -6,21 +6,19 @@ import shutil
 from app.db.database import get_db
 from app.models.patient import Patient
 from app.models.document import Document
+from app.models.user import User
+from app.core.dependencies import get_current_user
 
 
 router = APIRouter()
 
 
 @router.post("/documents/upload")
-def upload_document(
-    patient_id: int,
-    file: UploadFile = File(...),
-    db: Session = Depends(get_db)
-):
+def upload_document(patient_id: int,file: UploadFile = File(...),current_user:User=Depends(get_current_user),db: Session = Depends(get_db)):
 
-    
     patient = db.query(Patient).filter(
-        Patient.id == patient_id
+        Patient.id == patient_id,
+        Patient.user_id==current_user.id
     ).first()
 
     if not patient:

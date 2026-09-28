@@ -3,7 +3,7 @@ from sqlalchemy.orm import Session
 from app.db.database import get_db
 from app.models.user import User
 from app.schemas.user import UserCreate,UserLogin
-from app.core.security import hash_password,verify_password
+from app.core.security import hash_password,verify_password,create_access_token
 
 router=APIRouter()
 
@@ -11,8 +11,7 @@ router=APIRouter()
 @router.post("/register")
 def register(user:UserCreate,db:Session=Depends(get_db)):
     hashed_password=hash_password(user.password)
-    new_user=User(email=user.email,
-    password_hash=hashed_password)
+    new_user=User(email=user.email,password_hash=hashed_password)
     db.add(new_user)
     db.commit()
     db.refresh(new_user)
@@ -40,8 +39,10 @@ def login(user: UserLogin, db: Session = Depends(get_db)):
     if not password_valid:
         return {"message": "Invalid email or password"}
 
+    access_token=create_access_token(db_user.id)
+
     return {
         "message": "Login successful",
-        "user_id": db_user.id,
-        "email": db_user.email
+        "access_token":access_token,
+        "token_type":"bearer"
     }
