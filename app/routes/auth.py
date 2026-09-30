@@ -2,8 +2,9 @@ from fastapi import APIRouter,Depends
 from sqlalchemy.orm import Session
 from app.db.database import get_db
 from app.models.user import User
-from app.schemas.user import UserCreate,UserLogin
+from app.schemas.user import UserCreate
 from app.core.security import hash_password,verify_password,create_access_token
+from fastapi.security import OAuth2PasswordRequestForm
 
 router=APIRouter()
 
@@ -24,15 +25,14 @@ def register(user:UserCreate,db:Session=Depends(get_db)):
 
 
 @router.post("/login")
-def login(user: UserLogin, db: Session = Depends(get_db)):
-
-    db_user = db.query(User).filter(User.email == user.email).first()
+def login(form_data:OAuth2PasswordRequestForm=Depends(),db:Session=Depends(get_db)):
+    db_user = db.query(User).filter(User.email == form_data.username).first()
 
     if not db_user:
         return {"message": "Invalid email or password"}
 
     password_valid = verify_password(
-        user.password,
+        form_data.password,
         db_user.password_hash
     )
 
