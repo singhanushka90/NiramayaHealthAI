@@ -4,6 +4,26 @@ from sentence_transformers import SentenceTransformer
 
 embedding_model=SentenceTransformer("BAAI/bge-small-en-v1.5")
 
+def detect_pdf_type(file_path:str):
+    document=fitz.open(file_path)
+    total_text_length=0
+    total_pages=len(document)
+    for page in document:
+        text=page.get_text().strip()
+        total_text_length+=len(text)
+    document.close()
+    if total_text_length<50:
+        return {
+            "document_type":"scanned",
+            "total_pages":total_pages,
+            "text_length":total_text_length
+        }
+    return {
+        "document_type":"digital",
+        "total_pages":total_pages,
+        "text_length":total_text_length
+    }
+
 def extract_text_from_pdf(file_path:str):
     document=fitz.open(file_path)
     text=""
