@@ -1,6 +1,7 @@
 import fitz
 from langchain_text_splitters import RecursiveCharacterTextSplitter
 from sentence_transformers import SentenceTransformer
+from app.services.ocr_processor import extract_text_with_ocr
 
 embedding_model=SentenceTransformer("BAAI/bge-small-en-v1.5")
 
