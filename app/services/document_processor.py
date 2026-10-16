@@ -41,3 +41,4 @@ def split_text_into_chunks(text:str):
 def generate_embeddings(chunks):
     embeddings=embedding_model.encode(chunks,normalize_embeddings=True)
     return embeddings
+
