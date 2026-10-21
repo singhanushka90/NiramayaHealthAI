@@ -1,4 +1,4 @@
-from sqlalchemy import Column , Integer , String , DateTime ,ForeignKey
+from sqlalchemy import Column , Integer , String , DateTime ,ForeignKey,Text
 from sqlalchemy.sql import func
 from app.db.database import Base
 
@@ -11,3 +11,8 @@ class Document(Base):
     file_type=Column(String,nullable=False)
     
     uploaded_at=Column(DateTime(timezone=True),server_default=func.now())
+    extracted_text=Column(Text,nullable=True)
+    pdf_type=Column(String(20),nullable=True)
+    document_type=Column(String(100),nullable=True)
+    extraction_method=Column(String(30),nullable=True)
+    processing_status=Column(String(30),default="pending",nullable=True)
