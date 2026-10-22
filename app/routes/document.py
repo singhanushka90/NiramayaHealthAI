@@ -1,3 +1,5 @@
+from pydoc import doc
+
 from fastapi import APIRouter, Depends, UploadFile, File, HTTPException
 from sqlalchemy.orm import Session
 from pathlib import Path
@@ -34,7 +36,7 @@ def upload_document(
         )
 
 
-    if not file.filename or Path(file.filename).suffix.lower() != ".pdf":
+    if not file.file_name or Path(file.file_name).suffix.lower() != ".pdf":
         raise HTTPException(
             status_code=400,
             detail="Only PDF files are allowed"
@@ -44,7 +46,7 @@ def upload_document(
     upload_dir = Path("uploads") / f"patient_{patient_id}"
     upload_dir.mkdir(parents=True, exist_ok=True)
 
-    file_path = upload_dir / Path(file.filename).name
+    file_path = upload_dir / Path(file.file_name).name
 
     try:
         with open(file_path, "wb") as buffer:
@@ -218,6 +220,12 @@ def list_patient_documents(
         "documents":[
             {"id":doc.id,
              "file_name":doc.file_name,
-             }
+             "file_type":doc.file_name,
+             "pdf_type":doc.pdf_type,
+             "documents_type":doc.document_type,
+             "extraction_method":doc.extraction_method,
+             "processing_status":doc.processing_status,
+             "uploaded_at":doc.uploaded_at}
+             for doc in documents
         ]
     }
