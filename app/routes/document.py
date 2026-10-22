@@ -55,7 +55,7 @@ def upload_document(
 
     new_document = Document(
         patient_id=patient_id,
-        file_name=Path(file.filename).name,
+        file_name=Path(file.file_name).name,
         file_path=str(file_path),
         file_type=file.content_type or "application/pdf",
         processing_status="pending"
@@ -193,4 +193,31 @@ def delete_document(
         "message": "Document deleted successfully",
         "document_id": document_id,
         "file_deleted": True
+    }
+
+@router.get("/patients/{patient_id}/documents")
+def list_patient_documents(
+    patient_id: int,
+    current_user:User=Depends(get_current_user),
+    db: Session =Depends(get_db)
+):
+    patient=db.query(Patient).filter(Patient.id==patient_id,
+                                     Patient.user_id==current_user.id).first()
+    if not patient:
+        raise HTTPException(
+            status_code=404,
+            detail="Patient not found"
+        )
+    documents=(
+        db.query(Document)
+        .filter(Document.patient_id==patient_id)
+        .order_by(Document.uploaded_at.desc()).all())
+    return {
+        "patient_id":patient_id,
+        "total_documents":len(documents),
+        "documents":[
+            {"id":doc.id,
+             "file_name":doc.file_name,
+             }
+        ]
     }
