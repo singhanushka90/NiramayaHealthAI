@@ -125,3 +125,72 @@ def upload_document(
             status_code=500,
             detail="Document processing or database save failed. Check backend logs."
         )
+
+
+@router.delete("/documents/{document_id}")
+def delete_document(
+    document_id: int,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    
+    document = (
+        db.query(Document)
+        .join(Patient, Document.patient_id == Patient.id)
+        .filter(
+            Document.id == document_id,
+            Patient.user_id == current_user.id
+        )
+        .first()
+    )
+
+    if not document:
+        raise HTTPException(
+            status_code=404,
+            detail="Document not found"
+        )
+
+    upload_root = (Path.cwd() / "uploads").resolve()
+    file_path = Path(document.file_path).resolve()
+
+  
+    try:
+        file_path.relative_to(upload_root)
+    except ValueError:
+        raise HTTPException(
+            status_code=400,
+            detail="Document path is outside the uploads directory"
+        )
+
+    
+    if file_path.exists():
+        if not file_path.is_file():
+            raise HTTPException(
+                status_code=400,
+                detail="Document path is not a file"
+            )
+
+        try:
+            file_path.unlink()
+        except OSError:
+            raise HTTPException(
+                status_code=500,
+                detail="Could not delete the PDF file"
+            )
+
+
+    try:
+        db.delete(document)
+        db.commit()
+    except Exception:
+        db.rollback()
+        raise HTTPException(
+            status_code=500,
+            detail="Could not delete the document record"
+        )
+
+    return {
+        "message": "Document deleted successfully",
+        "document_id": document_id,
+        "file_deleted": True
+    }
