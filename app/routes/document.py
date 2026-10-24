@@ -71,10 +71,10 @@ def upload_document(
         db.commit()
         db.refresh(new_document)
 
-        # Extract text, classify document and extract CBC values
+       
         result = process_document(str(file_path))
 
-        # Handle processing failure
+      
         if result.get("status") != "success":
             new_document.processing_status = "error"
             db.commit()
@@ -92,15 +92,15 @@ def upload_document(
         pdf_info = result["pdf_info"]
         classification = result["classification"]
 
-        # Save extracted information
+        
         new_document.extracted_text = result["extracted_text"]
         new_document.pdf_type = pdf_info["document_type"]
         new_document.document_type = classification["document_type"]
 
-        # Save extracted CBC values as JSON
+        
         new_document.cbc_values = result.get("cbc_values")
 
-        # Record how text was extracted
+        
         new_document.extraction_method = (
             "ocr"
             if pdf_info["document_type"] == "scanned"
@@ -109,7 +109,7 @@ def upload_document(
 
         new_document.processing_status = "success"
 
-        # Save all changes to PostgreSQL
+        
         db.commit()
         db.refresh(new_document)
 
@@ -126,10 +126,15 @@ def upload_document(
             "processing_status": new_document.processing_status
         }
 
-    except Exception:
+    except Exception as e:
+        import traceback
+        traceback.print_exc()
         db.rollback()
-
-        # Mark the document as failed if its record exists
+        raise HTTPException(
+            status_code=500,
+            detail=f"Document Processing failed : {str(e)}"
+        )
+        
         try:
             db.refresh(new_document)
             new_document.processing_status = "error"
@@ -146,9 +151,7 @@ def upload_document(
         )
 
 
-# --------------------------------------------------
-# 2. Get All Documents for a Patient
-# --------------------------------------------------
+
 
 @router.get("/patients/{patient_id}/documents")
 def get_patient_documents(
@@ -191,9 +194,7 @@ def get_patient_documents(
     }
 
 
-# --------------------------------------------------
-# 3. Get Document Details and Extracted Information
-# --------------------------------------------------
+
 
 @router.get("/documents/{document_id}")
 def get_document(
@@ -232,9 +233,7 @@ def get_document(
     }
 
 
-# --------------------------------------------------
-# 4. Delete a Document
-# --------------------------------------------------
+
 
 @router.delete("/documents/{document_id}")
 def delete_document(
@@ -258,18 +257,18 @@ def delete_document(
             detail="Document not found"
         )
 
-    # Resolve the upload directory and document path
+
     upload_root = Path("uploads").resolve()
     file_path = Path(document.file_path).resolve()
 
-    # Prevent deleting files outside the uploads directory
+    
     if file_path != upload_root and upload_root not in file_path.parents:
         raise HTTPException(
             status_code=400,
             detail="Invalid document file path"
         )
 
-    # Delete database record and then the physical file
+    
     try:
         db.delete(document)
         db.commit()
