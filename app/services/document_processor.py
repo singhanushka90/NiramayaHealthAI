@@ -3,6 +3,7 @@ from langchain_text_splitters import RecursiveCharacterTextSplitter
 from sentence_transformers import SentenceTransformer
 from app.services.ocr_processor import extract_text_with_ocr
 from app.services.document_classifier import classify_document_by_rules
+from app.services.medical_extractor import extract_cbc_values
 
 embedding_model=SentenceTransformer("BAAI/bge-small-en-v1.5")
 
@@ -50,22 +51,28 @@ def process_document(file_path:str):
     if pdf_info["document_type"]=="scanned":
         ocr_result=extract_text_with_ocr(file_path)
         extracted_text=ocr_result["text"]
+        extraction_method="ocr"
     else:
         extracted_text=extract_text_from_pdf(file_path)
+        extraction_method="digital_text"
+       
     if not extracted_text.strip():
         return{
             "status":"error",
             "message":"No text could be extracted from the PDF",
             "pdf_info": pdf_info
         }
+    cbc_values=extract_cbc_values(extracted_text)
     classification=classify_document_by_rules(extracted_text)
     chunks=split_text_into_chunks(extracted_text)
     embeddings=generate_embeddings(chunks) if chunks else []
     return{
         "status":"success",
         "pdf_info": pdf_info,
+        "extraction_method":extraction_method,
         "classification":classification,
         "extracted_text":extracted_text,
+        "cbc_values":cbc_values,
         "chunks":chunks,
         "embeddings":embeddings
     }

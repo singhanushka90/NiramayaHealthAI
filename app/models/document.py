@@ -1,4 +1,4 @@
-from sqlalchemy import Column , Integer , String , DateTime ,ForeignKey,Text
+from sqlalchemy import Column , Integer , String , DateTime ,ForeignKey,Text,JSON
 from sqlalchemy.sql import func
 from app.db.database import Base
 
@@ -16,3 +16,4 @@ class Document(Base):
     document_type=Column(String(100),nullable=True)
     extraction_method=Column(String(30),nullable=True)
     processing_status=Column(String(30),default="pending",nullable=True)
+    cbc_values=Column(JSON,nullable=True)

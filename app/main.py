@@ -5,7 +5,7 @@ from app.routes.auth import router as auth_router
 from app.routes.patient import router as patient_router
 from app.routes.document import router as document_router
 from app.core.dependencies import get_current_user
-from app.models.user import User
+
 Base.metadata.create_all(bind=engine)
 
 

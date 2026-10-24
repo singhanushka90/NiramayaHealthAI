@@ -14,6 +14,10 @@ from app.services.document_processor import process_document
 router = APIRouter()
 
 
+# --------------------------------------------------
+# 1. Upload and Process PDF
+# --------------------------------------------------
+
 @router.post("/documents/upload")
 def upload_document(
     patient_id: int,
@@ -21,7 +25,7 @@ def upload_document(
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db)
 ):
-    
+    # Check whether patient belongs to the logged-in user
     patient = db.query(Patient).filter(
         Patient.id == patient_id,
         Patient.user_id == current_user.id
@@ -33,26 +37,27 @@ def upload_document(
             detail="Patient not found"
         )
 
-
+    # Allow only PDF files
     if not file.filename or Path(file.filename).suffix.lower() != ".pdf":
         raise HTTPException(
             status_code=400,
             detail="Only PDF files are allowed"
         )
 
-
+    # Create patient-specific upload directory
     upload_dir = Path("uploads") / f"patient_{patient_id}"
     upload_dir.mkdir(parents=True, exist_ok=True)
 
     file_path = upload_dir / Path(file.filename).name
 
+    # Save uploaded PDF
     try:
         with open(file_path, "wb") as buffer:
             shutil.copyfileobj(file.file, buffer)
     finally:
         file.file.close()
 
-
+    # Create document database record
     new_document = Document(
         patient_id=patient_id,
         file_name=Path(file.filename).name,
@@ -66,9 +71,10 @@ def upload_document(
         db.commit()
         db.refresh(new_document)
 
+        # Extract text, classify document and extract CBC values
         result = process_document(str(file_path))
 
-        
+        # Handle processing failure
         if result.get("status") != "success":
             new_document.processing_status = "error"
             db.commit()
@@ -77,27 +83,36 @@ def upload_document(
                 "message": "PDF uploaded, but text processing failed",
                 "document_id": new_document.id,
                 "processing_status": "error",
-                "details": result.get("message", "Text extraction failed")
+                "details": result.get(
+                    "message",
+                    "Text extraction failed"
+                )
             }
 
-    
         pdf_info = result["pdf_info"]
         classification = result["classification"]
 
+        # Save extracted information
         new_document.extracted_text = result["extracted_text"]
         new_document.pdf_type = pdf_info["document_type"]
         new_document.document_type = classification["document_type"]
+
+        # Save extracted CBC values as JSON
+        new_document.cbc_values = result.get("cbc_values")
+
+        # Record how text was extracted
         new_document.extraction_method = (
             "ocr"
             if pdf_info["document_type"] == "scanned"
             else "digital_text"
         )
+
         new_document.processing_status = "success"
 
+        # Save all changes to PostgreSQL
         db.commit()
         db.refresh(new_document)
 
-    
         return {
             "message": "Document uploaded and processed successfully",
             "document_id": new_document.id,
@@ -106,6 +121,7 @@ def upload_document(
             "pdf_type": new_document.pdf_type,
             "document_type": new_document.document_type,
             "extraction_method": new_document.extraction_method,
+            "cbc_values": new_document.cbc_values,
             "text_length": len(new_document.extracted_text or ""),
             "processing_status": new_document.processing_status
         }
@@ -113,7 +129,7 @@ def upload_document(
     except Exception:
         db.rollback()
 
-        # Try to mark the document as failed if its record exists
+        # Mark the document as failed if its record exists
         try:
             db.refresh(new_document)
             new_document.processing_status = "error"
@@ -123,17 +139,68 @@ def upload_document(
 
         raise HTTPException(
             status_code=500,
-            detail="Document processing or database save failed. Check backend logs."
+            detail=(
+                "Document processing or database save failed. "
+                "Check backend logs."
+            )
         )
 
 
-@router.delete("/documents/{document_id}")
-def delete_document(
+# --------------------------------------------------
+# 2. Get All Documents for a Patient
+# --------------------------------------------------
+
+@router.get("/patients/{patient_id}/documents")
+def get_patient_documents(
+    patient_id: int,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    # Verify patient ownership
+    patient = db.query(Patient).filter(
+        Patient.id == patient_id,
+        Patient.user_id == current_user.id
+    ).first()
+
+    if not patient:
+        raise HTTPException(
+            status_code=404,
+            detail="Patient not found"
+        )
+
+    documents = db.query(Document).filter(
+        Document.patient_id == patient_id
+    ).order_by(Document.uploaded_at.desc()).all()
+
+    return {
+        "patient_id": patient_id,
+        "total_documents": len(documents),
+        "documents": [
+            {
+                "id": document.id,
+                "file_name": document.file_name,
+                "file_type": document.file_type,
+                "pdf_type": document.pdf_type,
+                "document_type": document.document_type,
+                "extraction_method": document.extraction_method,
+                "processing_status": document.processing_status,
+                "uploaded_at": document.uploaded_at
+            }
+            for document in documents
+        ]
+    }
+
+
+# --------------------------------------------------
+# 3. Get Document Details and Extracted Information
+# --------------------------------------------------
+
+@router.get("/documents/{document_id}")
+def get_document(
     document_id: int,
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db)
 ):
-    
     document = (
         db.query(Document)
         .join(Patient, Document.patient_id == Patient.id)
@@ -150,35 +217,59 @@ def delete_document(
             detail="Document not found"
         )
 
-    upload_root = (Path.cwd() / "uploads").resolve()
-    file_path = Path(document.file_path).resolve()
+    return {
+        "id": document.id,
+        "patient_id": document.patient_id,
+        "file_name": document.file_name,
+        "file_type": document.file_type,
+        "pdf_type": document.pdf_type,
+        "document_type": document.document_type,
+        "extraction_method": document.extraction_method,
+        "processing_status": document.processing_status,
+        "extracted_text": document.extracted_text,
+        "cbc_values": document.cbc_values,
+        "uploaded_at": document.uploaded_at
+    }
 
-  
-    try:
-        file_path.relative_to(upload_root)
-    except ValueError:
+
+# --------------------------------------------------
+# 4. Delete a Document
+# --------------------------------------------------
+
+@router.delete("/documents/{document_id}")
+def delete_document(
+    document_id: int,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    document = (
+        db.query(Document)
+        .join(Patient, Document.patient_id == Patient.id)
+        .filter(
+            Document.id == document_id,
+            Patient.user_id == current_user.id
+        )
+        .first()
+    )
+
+    if not document:
         raise HTTPException(
-            status_code=400,
-            detail="Document path is outside the uploads directory"
+            status_code=404,
+            detail="Document not found"
         )
 
-    
-    if file_path.exists():
-        if not file_path.is_file():
-            raise HTTPException(
-                status_code=400,
-                detail="Document path is not a file"
-            )
+    # Resolve the upload directory and document path
+    upload_root = Path("uploads").resolve()
+    file_path = Path(document.file_path).resolve()
 
-        try:
-            file_path.unlink()
-        except OSError:
-            raise HTTPException(
-                status_code=500,
-                detail="Could not delete the PDF file"
-            )
+    # Prevent deleting files outside the uploads directory
+    if file_path != upload_root and upload_root not in file_path.parents:
+        raise HTTPException(
+            status_code=400,
+            detail="Invalid document file path"
+        )
 
-
+    # Delete database record and then the physical file
     try:
         db.delete(document)
         db.commit()
@@ -186,44 +277,18 @@ def delete_document(
         db.rollback()
         raise HTTPException(
             status_code=500,
-            detail="Could not delete the document record"
+            detail="Failed to delete document from database"
         )
+
+    try:
+        if file_path.is_file():
+            file_path.unlink()
+    except OSError:
+        # The database record is already deleted.
+        # The leftover file may need manual cleanup.
+        pass
 
     return {
         "message": "Document deleted successfully",
-        "document_id": document_id,
-        "file_deleted": True
-    }
-
-@router.get("/patients/{patient_id}/documents")
-def list_patient_documents(
-    patient_id: int,
-    current_user:User=Depends(get_current_user),
-    db: Session =Depends(get_db)
-):
-    patient=db.query(Patient).filter(Patient.id==patient_id,
-                                     Patient.user_id==current_user.id).first()
-    if not patient:
-        raise HTTPException(
-            status_code=404,
-            detail="Patient not found"
-        )
-    documents=(
-        db.query(Document)
-        .filter(Document.patient_id==patient_id)
-        .order_by(Document.uploaded_at.desc()).all())
-    return {
-        "patient_id":patient_id,
-        "total_documents":len(documents),
-        "documents":[
-            {"id":doc.id,
-             "file_name":doc.filename,
-             "file_type":doc.file_type,
-             "pdf_type":doc.pdf_type,
-             "document_type":doc.document_type,
-             "extraction_method":doc.extraction_method,
-             "processing_status":doc.processing_status,
-             "uploaded_at":doc.uploaded_at}
-             for doc in documents
-        ]
+        "document_id": document_id
     }
