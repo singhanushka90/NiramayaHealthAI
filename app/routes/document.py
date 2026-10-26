@@ -185,7 +185,7 @@ def get_patient_documents(
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db)
 ):
-    # Verify patient ownership
+   
     patient = db.query(Patient).filter(
         Patient.id == patient_id,
         Patient.user_id == current_user.id
