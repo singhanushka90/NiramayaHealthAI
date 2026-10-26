@@ -127,7 +127,7 @@ def extract_cbc_values(text: str) -> dict:
                     reference_range = candidate
                     break
 
-            # Save the extracted information
+            
             results[test_name] = {
                 "raw_value": value,
                 "unit": unit,
