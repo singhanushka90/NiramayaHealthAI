@@ -1,4 +1,10 @@
-from fastapi import APIRouter, Depends, UploadFile, File, HTTPException
+from fastapi import (
+    APIRouter,
+    Depends,
+    UploadFile,
+    File,
+    HTTPException,
+)
 from sqlalchemy.orm import Session
 from pathlib import Path
 import shutil
@@ -8,7 +14,9 @@ from app.models.patient import Patient
 from app.models.document import Document
 from app.models.user import User
 from app.core.dependencies import get_current_user
+
 from app.services.document_processor import process_document
+from app.services.qdrant_service import store_document_chunks
 
 
 router = APIRouter()
@@ -23,47 +31,54 @@ def upload_document(
     patient_id: int,
     file: UploadFile = File(...),
     current_user: User = Depends(get_current_user),
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_db),
 ):
     # Check whether patient belongs to the logged-in user
     patient = db.query(Patient).filter(
         Patient.id == patient_id,
-        Patient.user_id == current_user.id
+        Patient.user_id == current_user.id,
     ).first()
 
     if not patient:
         raise HTTPException(
             status_code=404,
-            detail="Patient not found"
+            detail="Patient not found",
         )
 
     # Allow only PDF files
     if not file.filename or Path(file.filename).suffix.lower() != ".pdf":
         raise HTTPException(
             status_code=400,
-            detail="Only PDF files are allowed"
+            detail="Only PDF files are allowed",
         )
 
     # Create patient-specific upload directory
     upload_dir = Path("uploads") / f"patient_{patient_id}"
     upload_dir.mkdir(parents=True, exist_ok=True)
 
-    file_path = upload_dir / Path(file.filename).name
+    # Keep only the filename, not any supplied directory path
+    file_name = Path(file.filename).name
+    file_path = upload_dir / file_name
 
     # Save uploaded PDF
     try:
         with open(file_path, "wb") as buffer:
             shutil.copyfileobj(file.file, buffer)
+    except OSError as exc:
+        raise HTTPException(
+            status_code=500,
+            detail="Could not save the uploaded PDF",
+        ) from exc
     finally:
         file.file.close()
 
     # Create document database record
     new_document = Document(
         patient_id=patient_id,
-        file_name=Path(file.filename).name,
+        file_name=file_name,
         file_path=str(file_path),
         file_type=file.content_type or "application/pdf",
-        processing_status="pending"
+        processing_status="pending",
     )
 
     try:
@@ -71,10 +86,9 @@ def upload_document(
         db.commit()
         db.refresh(new_document)
 
-       
+        # Step 1: Extract text, classify, chunk and generate embeddings
         result = process_document(str(file_path))
 
-      
         if result.get("status") != "success":
             new_document.processing_status = "error"
             db.commit()
@@ -85,31 +99,38 @@ def upload_document(
                 "processing_status": "error",
                 "details": result.get(
                     "message",
-                    "Text extraction failed"
-                )
+                    "Text extraction failed",
+                ),
             }
 
         pdf_info = result["pdf_info"]
         classification = result["classification"]
 
-        
+        # Step 2: Save extracted medical data in PostgreSQL
         new_document.extracted_text = result["extracted_text"]
         new_document.pdf_type = pdf_info["document_type"]
         new_document.document_type = classification["document_type"]
-
-        
         new_document.cbc_values = result.get("cbc_values")
 
-        
         new_document.extraction_method = (
-            "ocr"
-            if pdf_info["document_type"] == "scanned"
-            else "digital_text"
+            result.get("extraction_method", "digital_text")
         )
 
-        new_document.processing_status = "success"
+        # Save extracted data before attempting vector storage
+        new_document.processing_status = "pending"
+        db.commit()
+        db.refresh(new_document)
 
-        
+        # Step 3: Store chunks and embeddings in Qdrant Cloud
+        stored_chunks = store_document_chunks(
+            document_id=new_document.id,
+            patient_id=patient_id,
+            chunks=result["chunks"],
+            embeddings=result["embeddings"],
+        )
+
+        # Step 4: Mark processing successful only after Qdrant storage
+        new_document.processing_status = "success"
         db.commit()
         db.refresh(new_document)
 
@@ -123,33 +144,38 @@ def upload_document(
             "extraction_method": new_document.extraction_method,
             "cbc_values": new_document.cbc_values,
             "text_length": len(new_document.extracted_text or ""),
-            "processing_status": new_document.processing_status
+            "qdrant_chunks_stored": stored_chunks,
+            "processing_status": new_document.processing_status,
         }
 
-    except Exception as e:
+    except HTTPException:
+        raise
+
+    except Exception as exc:
         import traceback
         traceback.print_exc()
+
         db.rollback()
-        raise HTTPException(
-            status_code=500,
-            detail=f"Document Processing failed : {str(e)}"
-        )
-        
+
+        # Best-effort status update for an already-created record.
         try:
-            db.refresh(new_document)
-            new_document.processing_status = "error"
-            db.commit()
+            existing_document = db.query(Document).filter(
+                Document.id == new_document.id
+            ).first()
+
+            if existing_document:
+                existing_document.processing_status = "error"
+                db.commit()
         except Exception:
             db.rollback()
 
         raise HTTPException(
             status_code=500,
             detail=(
-                "Document processing or database save failed. "
+                "Document processing or Qdrant storage failed. "
                 "Check backend logs."
-            )
-        )
-
+            ),
+        ) from exc
 
 
 
@@ -283,8 +309,7 @@ def delete_document(
         if file_path.is_file():
             file_path.unlink()
     except OSError:
-        # The database record is already deleted.
-        # The leftover file may need manual cleanup.
+        
         pass
 
     return {
