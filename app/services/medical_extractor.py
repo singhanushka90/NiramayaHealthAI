@@ -53,7 +53,7 @@ def extract_cbc_values(text: str) -> dict:
         ],
     }
 
-    # Step 3: Match numeric values
+    
     number_pattern = re.compile(
         r"\d[\d,]*(?:\.\d+)?"
     )
@@ -68,10 +68,10 @@ def extract_cbc_values(text: str) -> dict:
         re.IGNORECASE,
     )
 
-    # Step 5: Prepare results
+    
     results = {}
 
-    # Step 6: Extract each CBC test
+    
     for test_name, aliases in tests.items():
         results[test_name] = None
 
