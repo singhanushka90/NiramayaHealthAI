@@ -112,14 +112,14 @@ def extract_cbc_values(text: str) -> dict:
             unit = None
             reference_range = None
 
-            # Identify the unit if the second line is not a range
+            
             if len(following_lines) > 1:
                 possible_unit = following_lines[1].strip()
 
                 if not range_pattern.fullmatch(possible_unit):
                     unit = possible_unit
 
-            # Find the reference range
+            #
             for candidate in following_lines[1:]:
                 candidate = candidate.strip()
 
